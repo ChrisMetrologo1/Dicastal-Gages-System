@@ -1,0 +1,172 @@
+import customtkinter as ctk
+import sqlite3
+import pandas as pd
+from datetime import datetime
+from tkinter import messagebox
+
+# Configuración de apariencia
+ctk.set_appearance_mode("System")
+ctk.set_default_color_theme("blue")
+
+class AppGages(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+
+        self.title("Dicastal México - Gestión de Gages v3.0")
+        self.geometry("1300x800")
+
+        # Configuración del Layout
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+
+        # --- BARRA LATERAL (MENU) ---
+        self.sidebar = ctk.CTkFrame(self, width=220, corner_radius=0)
+        self.sidebar.grid(row=0, column=0, sticky="nsew")
+        
+        ctk.CTkLabel(self.sidebar, text="DICASTAL DMXII", font=("Roboto", 24, "bold")).pack(pady=20)
+        
+        # Botones Principales
+        ctk.CTkButton(self.sidebar, text="Refrescar Inventario", command=self.cargar_datos).pack(pady=10, padx=20)
+        ctk.CTkButton(self.sidebar, text="VER VENCIDOS", fg_color="#E74C3C", hover_color="#C0392B", command=self.filtrar_vencidos).pack(pady=10, padx=20)
+        
+        # FILTROS RÁPIDOS POR CLIENTE
+        ctk.CTkLabel(self.sidebar, text="Filtros por Cliente", font=("Roboto", 12, "bold")).pack(pady=(20,5))
+        clientes_frecuentes = ["TESLA", "NISSAN", "STELLANTIS", "VOLKSWAGEN"]
+        for cliente in clientes_frecuentes:
+            ctk.CTkButton(self.sidebar, text=cliente, fg_color="#34495E", height=28, 
+                          command=lambda c=cliente: self.filtrar_por_cliente(c)).pack(pady=5, padx=30)
+
+        ctk.CTkButton(self.sidebar, text="Exportar Excel", fg_color="#27AE60", command=self.exportar_excel).pack(side="bottom", pady=20, padx=20)
+
+        # --- PANEL PRINCIPAL ---
+        self.main = ctk.CTkFrame(self, corner_radius=15, fg_color="transparent")
+        self.main.grid(row=0, column=1, padx=20, pady=20, sticky="nsew")
+
+        # Buscador
+        self.search_var = ctk.StringVar()
+        self.search_var.trace_add("write", self.buscar_en_vivo)
+        self.entry_search = ctk.CTkEntry(self.main, placeholder_text="🔍 Escribe ID o Cliente para buscar...", width=600, height=40)
+        self.entry_search.configure(textvariable=self.search_var)
+        self.entry_search.pack(pady=10)
+
+        # INDICADOR DE CARGA
+        self.lbl_contador = ctk.CTkLabel(self.main, text="Mostrando: 0 de 811", font=("Roboto", 11))
+        self.lbl_contador.pack(pady=0)
+
+        # CABECERA FIJA ALINEADA
+        self.header_frame = ctk.CTkFrame(self.main, fg_color="#2C3E50", height=45)
+        self.header_frame.pack(fill="x", padx=10, pady=(10,0))
+        for i, (txt, w) in enumerate([("ID GAGE", 2), ("CLIENTE", 3), ("DESCRIPCIÓN", 3), ("ESTADO", 2)]):
+            self.header_frame.grid_columnconfigure(i, weight=w)
+            ctk.CTkLabel(self.header_frame, text=txt, font=("Roboto", 13, "bold"), text_color="white").grid(row=0, column=i, padx=15, sticky="w")
+
+        # TABLA CON SCROLL
+        self.tabla_container = ctk.CTkScrollableFrame(self.main, fg_color="transparent")
+        self.tabla_container.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        self.cargar_datos()
+
+    def obtener_datos(self):
+        try:
+            conn = sqlite3.connect('inventario_gages.db')
+            df = pd.read_sql_query("SELECT id_medicion, cliente, descripcion, ultima_calibracion FROM gages", conn)
+            conn.close()
+            df['ultima_calibracion'] = pd.to_datetime(df['ultima_calibracion'])
+            df['vence'] = df['ultima_calibracion'] + pd.DateOffset(years=1)
+            df['dias'] = (df['vence'] - pd.Timestamp.now().normalize()).dt.days
+            return df
+        except Exception as e:
+            print(f"Error base de datos: {e}")
+            return pd.DataFrame()
+
+    def mostrar_datos(self, df_filtro):
+        # Limpiar tabla
+        for widget in self.tabla_container.winfo_children():
+            widget.destroy()
+
+        # Actualizar Indicador
+        total_visto = len(df_filtro.head(60))
+        self.lbl_contador.configure(text=f"Mostrando {total_visto} de {len(df_filtro)} encontrados (Total Base: {len(self.df_maestro)})")
+
+        for _, r in df_filtro.head(60).iterrows():
+            color = "#E74C3C" if r['dias'] <= 0 else ("#F1C40F" if r['dias'] <= 15 else "#2ECC71")
+            est = "VENCIDO" if r['dias'] <= 0 else f"{int(r['dias'])} días"
+            id_actual = r['id_medicion']
+
+            # Fila
+            fila = ctk.CTkFrame(self.tabla_container, fg_color="transparent")
+            fila.pack(fill="x", pady=2)
+            for i, w in enumerate([2, 3, 3, 2]): fila.grid_columnconfigure(i, weight=w)
+
+            # Función para capturar el doble clic
+            def on_double_click(event, id_g=id_actual):
+                self.ventana_editar(id_g)
+
+            # Labels
+            labels = [
+                ctk.CTkLabel(fila, text=f"{id_actual}", anchor="w"),
+                ctk.CTkLabel(fila, text=f"{str(r['cliente'])[:30]}", anchor="w"),
+                ctk.CTkLabel(fila, text=f"{str(r['descripcion'])[:30]}", anchor="w"),
+                ctk.CTkLabel(fila, text=est, text_color=color, font=("Roboto", 12, "bold"))
+            ]
+
+            fila.bind("<Double-1>", on_double_click)
+            for i, lbl in enumerate(labels):
+                lbl.grid(row=0, column=i, padx=15, sticky="w")
+                lbl.bind("<Double-1>", on_double_click) # Bind a las letras
+
+    def ventana_editar(self, id_gage):
+        ventana = ctk.CTkToplevel(self)
+        ventana.title(f"Calibración: {id_gage}")
+        ventana.geometry("400x350")
+        ventana.attributes("-topmost", True)
+
+        ctk.CTkLabel(ventana, text="ACTUALIZAR GAGE", font=("Roboto", 18, "bold")).pack(pady=20)
+        ctk.CTkLabel(ventana, text=f"ID: {id_gage}").pack()
+        
+        nueva_fecha = ctk.CTkEntry(ventana, placeholder_text="AAAA-MM-DD")
+        nueva_fecha.insert(0, datetime.now().strftime("%Y-%m-%d"))
+        nueva_fecha.pack(pady=15)
+
+        def guardar():
+            try:
+                conn = sqlite3.connect('inventario_gages.db')
+                cursor = conn.close() # Reabrimos para editar
+                conn = sqlite3.connect('inventario_gages.db')
+                cursor = conn.cursor()
+                cursor.execute("UPDATE gages SET ultima_calibracion = ? WHERE id_medicion = ?", (nueva_fecha.get(), id_gage))
+                conn.commit()
+                conn.close()
+                messagebox.showinfo("Éxito", f"Gage {id_gage} actualizado.")
+                ventana.destroy()
+                self.cargar_datos()
+            except Exception as e:
+                messagebox.showerror("Error", f"Error: {e}")
+
+        ctk.CTkButton(ventana, text="GUARDAR", fg_color="green", command=guardar).pack(pady=20)
+
+    def cargar_datos(self):
+        self.df_maestro = self.obtener_datos()
+        self.mostrar_datos(self.df_maestro)
+
+    def filtrar_por_cliente(self, cliente):
+        res = self.df_maestro[self.df_maestro['cliente'].astype(str).str.contains(cliente, na=False)]
+        self.mostrar_datos(res)
+
+    def filtrar_vencidos(self):
+        self.mostrar_datos(self.df_maestro[self.df_maestro['dias'] <= 0])
+
+    def buscar_en_vivo(self, *args):
+        t = self.search_var.get().upper()
+        res = self.df_maestro[(self.df_maestro['id_medicion'].astype(str).str.contains(t)) | 
+                              (self.df_maestro['cliente'].astype(str).str.contains(t, na=False))]
+        self.mostrar_datos(res)
+
+    def exportar_excel(self):
+        nombre = f"Reporte_{datetime.now().strftime('%d_%m')}.xlsx"
+        self.df_maestro.to_excel(nombre, index=False)
+        messagebox.showinfo("Excel", f"Guardado como: {nombre}")
+
+if __name__ == "__main__":
+    app = AppGages()
+    app.mainloop()
