@@ -12,7 +12,7 @@ class AppGages(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Dicastal México - Gestión Pro v6.9 (Columnas Alineadas)")
+        self.title("Dicastal México - v6.9 ")
         self.geometry("1300x900")
 
         self.grid_columnconfigure(1, weight=1)
