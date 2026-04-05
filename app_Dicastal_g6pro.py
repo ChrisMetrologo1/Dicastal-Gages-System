@@ -12,7 +12,7 @@ class AppGages(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Dicastal México - Gestión de Gages v4.0")
+        self.title("Dicastal México - Gestión de Gages v5.0")
         self.geometry("1300x850")
 
         self.grid_columnconfigure(1, weight=1)
@@ -27,9 +27,6 @@ class AppGages(ctk.CTk):
         self.btn_nuevo = ctk.CTkButton(self.sidebar, text="+ AGREGAR NUEVO", fg_color="#2980B9", hover_color="#1F618D", command=self.ventana_nuevo_gage)
         self.btn_nuevo.pack(pady=10, padx=20)
 
-        self.btn_id_manager = ctk.CTkButton(self.sidebar, text="⚙️ CAMBIO INGENIERÍA", fg_color="#8E44AD", hover_color="#7D3C98", command=self.ventana_gestionar_id)
-        self.btn_id_manager.pack(pady=10, padx=20)
-
         ctk.CTkButton(self.sidebar, text="Refrescar Inventario", command=self.cargar_datos).pack(pady=5, padx=20)
         ctk.CTkButton(self.sidebar, text="VER VENCIDOS", fg_color="#E74C3C", command=self.filtrar_vencidos).pack(pady=5, padx=20)
         
@@ -38,9 +35,8 @@ class AppGages(ctk.CTk):
             ctk.CTkButton(self.sidebar, text=cliente, fg_color="#34495E", height=28, 
                           command=lambda c=cliente: self.filtrar_por_cliente(c)).pack(pady=5, padx=30)
 
-        # --- SECCIÓN DE EXPORTACIÓN (NUEVA) ---
+        # --- SECCIÓN DE REPORTES ---
         ctk.CTkLabel(self.sidebar, text="Reportes Excel", font=("Roboto", 12, "bold")).pack(pady=(30,5))
-        
         ctk.CTkButton(self.sidebar, text="LISTA COMPLETA", fg_color="#27AE60", command=lambda: self.exportar_especifico("completo")).pack(pady=5, padx=20)
         ctk.CTkButton(self.sidebar, text="SOLO VENCIDOS", fg_color="#C0392B", command=lambda: self.exportar_especifico("vencidos")).pack(pady=5, padx=20)
         ctk.CTkButton(self.sidebar, text="PRÓXIMOS (30 DÍAS)", fg_color="#F39C12", command=lambda: self.exportar_especifico("proximos")).pack(pady=5, padx=20)
@@ -51,7 +47,7 @@ class AppGages(ctk.CTk):
 
         self.search_var = ctk.StringVar()
         self.search_var.trace_add("write", self.buscar_en_vivo)
-        self.entry_search = ctk.CTkEntry(self.main, placeholder_text="🔍 Buscar por ID o Cliente...", width=600, height=40)
+        self.entry_search = ctk.CTkEntry(self.main, placeholder_text="🔍 Buscar por ID, Cliente o Descripción...", width=600, height=40)
         self.entry_search.configure(textvariable=self.search_var)
         self.entry_search.pack(pady=10)
 
@@ -76,100 +72,119 @@ class AppGages(ctk.CTk):
     def obtener_datos(self):
         try:
             conn = sqlite3.connect('inventario_gages.db')
-            df = pd.read_sql_query("SELECT id_medicion, cliente, descripcion, ultima_calibracion FROM gages", conn)
+            # Seleccionamos ROWID para tener una llave única y evitar errores de edición
+            df = pd.read_sql_query("SELECT rowid, id_medicion, cliente, descripcion, ultima_calibracion FROM gages", conn)
             conn.close()
             df['ultima_calibracion'] = pd.to_datetime(df['ultima_calibracion'], errors='coerce')
             df['vence'] = df['ultima_calibracion'] + pd.DateOffset(years=1)
             df['dias'] = (df['vence'] - pd.Timestamp.now().normalize()).dt.days
             return df
-        except Exception as e:
+        except Exception:
             return pd.DataFrame()
 
     def mostrar_datos(self, df_filtro):
         for widget in self.tabla_container.winfo_children(): widget.destroy()
         total_base = len(self.df_maestro) if hasattr(self, 'df_maestro') else 0
-        self.lbl_contador.configure(text=f"Mostrando {len(df_filtro.head(60))} de {len(df_filtro)} encontrados (Total Base: {total_base})")
+        self.lbl_contador.configure(text=f"Mostrando {len(df_filtro.head(100))} de {len(df_filtro)} encontrados (Total Base: {total_base})")
         
-        for _, r in df_filtro.head(60).iterrows():
+        for idx, r in df_filtro.head(100).iterrows():
             dias = r['dias'] if pd.notnull(r['dias']) else 999
             color = "#E74C3C" if dias <= 0 else ("#F1C40F" if dias <= 15 else "#2ECC71")
             est = "VENCIDO" if dias <= 0 else f"{int(dias)} días"
-            id_val = r['id_medicion']
-            es_nan = pd.isna(id_val) or str(id_val).lower() == "nan" or id_val == ""
+            
+            # Limpieza visual de valores 'nan'
+            id_val = str(r['id_medicion']).strip()
+            es_nan = id_val.lower() in ["nan", "none", "", "nan.0"]
             id_display = "--- (SIN ID) ---" if es_nan else id_val
-            r_data = r.to_dict()
+            
+            cliente_val = "S/N" if str(r['cliente']).lower() in ["nan", "none"] else str(r['cliente'])
+            desc_val = "S/N" if str(r['descripcion']).lower() in ["nan", "none"] else str(r['descripcion'])
+
+            r_dict = r.to_dict()
             fila = ctk.CTkFrame(self.tabla_container, fg_color="transparent")
             fila.pack(fill="x", pady=2)
             for i, w in enumerate([2, 3, 3, 2]): fila.grid_columnconfigure(i, weight=w)
-            def on_double_click(event, data=r_data): self.ventana_editar(data)
+            
+            def abrir_edicion(event, data=r_dict): self.ventana_editar(data)
+            
             lbls = [
                 ctk.CTkLabel(fila, text=id_display, anchor="w", text_color="#3498DB" if es_nan else "white"),
-                ctk.CTkLabel(fila, text=f"{str(r['cliente'])[:25]}", anchor="w"),
-                ctk.CTkLabel(fila, text=f"{str(r['descripcion'])[:25]}", anchor="w"),
+                ctk.CTkLabel(fila, text=f"{cliente_val[:30]}", anchor="w"),
+                ctk.CTkLabel(fila, text=f"{desc_val[:30]}", anchor="w"),
                 ctk.CTkLabel(fila, text=est, text_color=color, font=("Roboto", 12, "bold"))
             ]
             for i, l in enumerate(lbls):
                 l.grid(row=0, column=i, padx=15, sticky="w")
-                l.bind("<Double-1>", on_double_click)
-            fila.bind("<Double-1>", on_double_click)
+                l.bind("<Double-1>", abrir_edicion)
+            fila.bind("<Double-1>", abrir_edicion)
 
     def cargar_datos(self):
         self.df_maestro = self.obtener_datos()
         self.mostrar_datos(self.df_maestro)
 
-    # --- EXPORTACIÓN MEJORADA ---
-    def exportar_especifico(self, tipo):
-        fecha_str = datetime.now().strftime('%d_%m_%Y')
-        if tipo == "completo":
-            df_final = self.df_maestro
-            nombre = f"Inventario_Completo_{fecha_str}.xlsx"
-        elif tipo == "vencidos":
-            df_final = self.df_maestro[self.df_maestro['dias'] <= 0]
-            nombre = f"Reporte_VENCIDOS_{fecha_str}.xlsx"
-        elif tipo == "proximos":
-            df_final = self.df_maestro[(self.df_maestro['dias'] > 0) & (self.df_maestro['dias'] <= 30)]
-            nombre = f"Reporte_PROXIMOS_30DIAS_{fecha_str}.xlsx"
-
-        if df_final.empty:
-            messagebox.showinfo("Reporte", "No hay datos que coincidan con este reporte.")
-            return
-
-        try:
-            df_final.to_excel(nombre, index=False)
-            messagebox.showinfo("Éxito", f"Archivo generado:\n{nombre}")
-        except Exception as e:
-            messagebox.showerror("Error", f"No se pudo generar el Excel: {e}")
-
-    # --- VENTANAS (REUTILIZADAS DE V3.9) ---
+    # --- VENTANA DE GESTIÓN (SIN ERROR DE LIMIT) ---
     def ventana_editar(self, r_data):
-        id_actual = r_data['id_medicion']
         v = ctk.CTkToplevel(self)
-        v.title("Editor de Gage")
+        v.title("Gestor de Gages")
         v.geometry("400x650")
         v.attributes("-topmost", True)
-        ctk.CTkLabel(v, text="GESTIÓN DE EQUIPO", font=("Roboto", 20, "bold")).pack(pady=20)
-        ent_id = ctk.CTkEntry(v, width=280); ent_id.insert(0, "" if pd.isna(id_actual) else id_actual); ent_id.pack(pady=5)
-        ent_desc = ctk.CTkEntry(v, width=280); ent_desc.insert(0, "" if pd.isna(r_data['descripcion']) else r_data['descripcion']); ent_desc.pack(pady=5)
-        ent_fecha = ctk.CTkEntry(v, width=280); f_s = r_data['ultima_calibracion'].strftime('%Y-%m-%d') if pd.notnull(r_data['ultima_calibracion']) else datetime.now().strftime("%Y-%m-%d")
-        ent_fecha.insert(0, f_s); ent_fecha.pack(pady=5)
+
+        ctk.CTkLabel(v, text="CENTRO DE CONTROL", font=("Roboto", 20, "bold")).pack(pady=20)
+        
+        # ID
+        ctk.CTkLabel(v, text="ID del Gage:").pack()
+        ent_id = ctk.CTkEntry(v, width=280)
+        id_init = "" if str(r_data['id_medicion']).lower() in ["nan", "none", "nan.0"] else str(r_data['id_medicion'])
+        ent_id.insert(0, id_init)
+        ent_id.pack(pady=5)
+
+        # Descripción
+        ctk.CTkLabel(v, text="\nDescripción / Medida:").pack()
+        ent_desc = ctk.CTkEntry(v, width=280)
+        desc_init = "" if str(r_data['descripcion']).lower() in ["nan", "none"] else str(r_data['descripcion'])
+        ent_desc.insert(0, desc_init)
+        ent_desc.pack(pady=5)
+
+        # Fecha
+        ctk.CTkLabel(v, text="\nÚltima Calibración (AAAA-MM-DD):").pack()
+        ent_fecha = ctk.CTkEntry(v, width=280)
+        f_s = r_data['ultima_calibracion'].strftime('%Y-%m-%d') if pd.notnull(r_data['ultima_calibracion']) else datetime.now().strftime("%Y-%m-%d")
+        ent_fecha.insert(0, f_s)
+        ent_fecha.pack(pady=5)
 
         def guardar():
-            conn = sqlite3.connect('inventario_gages.db'); cursor = conn.cursor()
-            cursor.execute("UPDATE gages SET id_medicion=?, descripcion=?, ultima_calibracion=? WHERE cliente=? AND descripcion=? AND (id_medicion=? OR id_medicion IS NULL OR id_medicion='') LIMIT 1",
-                           (ent_id.get().upper(), ent_desc.get().upper(), ent_fecha.get(), r_data['cliente'], r_data['descripcion'], id_actual))
-            conn.commit(); conn.close(); v.destroy(); self.cargar_datos()
+            n_id, n_desc, n_fecha = ent_id.get().strip().upper(), ent_desc.get().strip().upper(), ent_fecha.get().strip()
+            try:
+                conn = sqlite3.connect('inventario_gages.db')
+                cursor = conn.cursor()
+                # Usamos ROWID para actualizar exactamente la fila que seleccionamos
+                cursor.execute("UPDATE gages SET id_medicion=?, descripcion=?, ultima_calibracion=? WHERE rowid=?", 
+                               (n_id, n_desc, n_fecha, r_data['rowid']))
+                conn.commit()
+                conn.close()
+                v.destroy()
+                self.cargar_datos()
+            except Exception as e: messagebox.showerror("Error", f"No se pudo guardar: {e}")
 
         def eliminar():
-            if messagebox.askyesno("⚠️ ELIMINAR", "¿Borrar este registro?"):
-                conn = sqlite3.connect('inventario_gages.db'); cursor = conn.cursor()
-                cursor.execute("DELETE FROM gages WHERE cliente=? AND descripcion=? AND (id_medicion=? OR id_medicion IS NULL OR id_medicion='')", (r_data['cliente'], r_data['descripcion'], id_actual))
-                conn.commit(); conn.close(); v.destroy(); self.cargar_datos()
+            if messagebox.askyesno("⚠️ ELIMINAR", "¿Borrar este gage del sistema?"):
+                try:
+                    conn = sqlite3.connect('inventario_gages.db')
+                    cursor = conn.cursor()
+                    cursor.execute("DELETE FROM gages WHERE rowid=?", (r_data['rowid'],))
+                    conn.commit()
+                    conn.close()
+                    v.destroy()
+                    self.cargar_datos()
+                except Exception as e: messagebox.showerror("Error", str(e))
 
         ctk.CTkButton(v, text="GUARDAR CAMBIOS", fg_color="#27AE60", command=guardar).pack(pady=20)
-        ctk.CTkButton(v, text="🗑️ ELIMINAR GAGE", fg_color="#C0392B", command=eliminar).pack(pady=10)
+        ctk.CTkButton(v, text="🗑️ ELIMINAR REGISTRO", fg_color="#C0392B", command=eliminar).pack(pady=10)
 
+    # --- OTRAS FUNCIONES ---
     def ventana_nuevo_gage(self):
-        v = ctk.CTkToplevel(self); v.title("Nuevo Registro"); v.geometry("450x550"); v.attributes("-topmost", True)
+        v = ctk.CTkToplevel(self); v.title("Nuevo Gage"); v.geometry("450x550"); v.attributes("-topmost", True)
+        ctk.CTkLabel(v, text="ALTA DE EQUIPO", font=("Roboto", 20, "bold")).pack(pady=20)
         e_id = ctk.CTkEntry(v, placeholder_text="ID GAGE", width=300); e_id.pack(pady=10)
         e_cl = ctk.CTkEntry(v, placeholder_text="CLIENTE", width=300); e_cl.pack(pady=10)
         e_de = ctk.CTkEntry(v, placeholder_text="DESCRIPCIÓN", width=300); e_de.pack(pady=10)
@@ -178,23 +193,23 @@ class AppGages(ctk.CTk):
             conn = sqlite3.connect('inventario_gages.db'); cursor = conn.cursor()
             cursor.execute("INSERT INTO gages (id_medicion, cliente, descripcion, ultima_calibracion) VALUES (?,?,?,?)", (e_id.get().upper(), e_cl.get().upper(), e_de.get().upper(), e_fe.get()))
             conn.commit(); conn.close(); v.destroy(); self.cargar_datos()
-        ctk.CTkButton(v, text="AÑADIR", command=registrar).pack(pady=30)
+        ctk.CTkButton(v, text="AÑADIR", fg_color="#2980B9", command=registrar).pack(pady=30)
 
-    def ventana_gestionar_id(self):
-        v = ctk.CTkToplevel(self); v.title("Ingeniería"); v.geometry("400x400"); v.attributes("-topmost", True)
-        ev = ctk.CTkEntry(v, placeholder_text="ID Actual", width=300); ev.pack(pady=10)
-        en = ctk.CTkEntry(v, placeholder_text="Nuevo ID", width=300); en.pack(pady=10)
-        def aplicar():
-            conn = sqlite3.connect('inventario_gages.db'); cursor = conn.cursor()
-            cursor.execute("UPDATE gages SET id_medicion = ? WHERE id_medicion = ?", (en.get().upper(), ev.get().upper()))
-            conn.commit(); conn.close(); v.destroy(); self.cargar_datos()
-        ctk.CTkButton(v, text="APLICAR", command=aplicar).pack(pady=30)
+    def exportar_especifico(self, tipo):
+        fecha = datetime.now().strftime('%d_%m_%Y')
+        if tipo == "completo": df, nom = self.df_maestro, f"Inventario_Completo_{fecha}.xlsx"
+        elif tipo == "vencidos": df, nom = self.df_maestro[self.df_maestro['dias'] <= 0], f"VENCIDOS_{fecha}.xlsx"
+        elif tipo == "proximos": df, nom = self.df_maestro[(self.df_maestro['dias'] > 0) & (self.df_maestro['dias'] <= 30)], f"PROXIMOS_30DIAS_{fecha}.xlsx"
+        if df.empty: return
+        df.to_excel(nom, index=False)
+        messagebox.showinfo("Éxito", f"Archivo generado: {nom}")
 
     def filtrar_por_cliente(self, c): self.mostrar_datos(self.df_maestro[self.df_maestro['cliente'].astype(str).str.contains(c, na=False)])
     def filtrar_vencidos(self): self.mostrar_datos(self.df_maestro[self.df_maestro['dias'] <= 0])
     def buscar_en_vivo(self, *args):
         t = self.search_var.get().upper()
-        self.mostrar_datos(self.df_maestro[(self.df_maestro['id_medicion'].astype(str).str.contains(t, na=False)) | (self.df_maestro['cliente'].astype(str).str.contains(t, na=False))])
+        self.mostrar_datos(self.df_maestro[(self.df_maestro['id_medicion'].astype(str).str.contains(t, na=False)) | (self.df_maestro['cliente'].astype(str).str.contains(t, na=False)) | (self.df_maestro['descripcion'].astype(str).str.contains(t, na=False))])
 
 if __name__ == "__main__":
     app = AppGages(); app.mainloop()
+    
