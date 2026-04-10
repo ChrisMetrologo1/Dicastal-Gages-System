@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mi Asistente de Compras</title>
+    <link rel="stylesheet" href="APP_COMPRAS_STYLES.CSS">
+</head>
+<body>
+
+    <h1>Mi Calculadora de Súper</h1>
+    <p>Control de Gastos</p>
+
+    <div class="input-container">
+        <input type="text" id="producto" placeholder="Nombre del producto">
+        <input type="number" id="precio" placeholder="Precio ($)">
+        <input type="number" id="cantidad" placeholder="Cantidad">
+        
+        <div class="radio-group">
+            <label><input type="radio" name="tipo" value="unidad" checked> Unidad</label>
+            <label><input type="radio" name="tipo" value="kg"> Kg</label>
+        </div>
+
+        <button onclick="agregarProducto()" class="btn-agregar">Agregar a la lista</button>
+        <button onclick="borrarListaCompleta()" class="btn-limpiar">Borrar Todo</button>
+    </div>
+
+    <h2>Lista de Compras</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Producto</th>
+                <th>Tipo</th>
+                <th>Precio Base</th>
+                <th>Cantidad</th>
+                <th>Total</th>
+                <th>Acción</th>
+            </tr>
+        </thead>
+        <tbody id="cuerpoTabla">
+            </tbody>
+    </table>
+
+    <h3 class="total-final">Total a pagar: $<span id="totalVenta">0.00</span></h3>
+
+    <script src="APP_COMPRAS_JAVA.JS"></script>
+</body>
+</html>
